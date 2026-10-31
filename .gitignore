@@ -1,0 +1,64 @@
+# =========================
+# Environment & Secrets
+# =========================
+.env
+.env.local
+.env.*.local
+*.pem
+firebase-key.json
+**/firebase-key.json
+
+# =========================
+# Python / FastAPI
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+*.sqlite3
+
+# =========================
+# Node.js / Next.js / Expo (pnpm)
+# =========================
+node_modules/
+.next/
+out/
+.turbo/
+.expo/
+.expo-shared/
+pnpm-debug.log*
+
+# =========================
+# IDE & Editors
+# =========================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# =========================
+# Testing & Coverage
+# =========================
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# =========================
+# Logs & Temp
+# =========================
+*.log
+logs/
+tmp/
+temp/

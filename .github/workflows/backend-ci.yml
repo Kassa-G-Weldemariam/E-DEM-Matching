@@ -1,0 +1,196 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - "edem-api/**"
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "edem-api/**"
+      - "docker-compose.yml"
+      - ".env.example"
+      - ".github/workflows/backend-ci.yml"
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-lint:
+    name: Lint, Test, Migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: edem-api
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: edem_ci
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d edem_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+      redis:
+        image: redis:7
+        ports:
+          - "6379:6379"
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      ENVIRONMENT: test
+      SECRET_KEY: ci-secret-key-change-me
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/edem_ci
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/edem_test
+      REDIS_URL: redis://localhost:6379/0
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: edem-api/uv.lock
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Create test databases
+        run: |
+          create_db_if_not_exists() {
+            local db_name="$1"
+            exists="$(docker exec ${{ job.services.postgres.id }} psql -U postgres -d edem_ci -tAc \
+              "SELECT 1 FROM pg_database WHERE datname='${db_name}'" | tr -d '[:space:]')"
+            if [[ "$exists" != "1" ]]; then
+              docker exec ${{ job.services.postgres.id }} psql -U postgres -d edem_ci \
+                -c "CREATE DATABASE \"${db_name}\";"
+            fi
+          }
+
+          create_db_if_not_exists "edem_test"
+          create_db_if_not_exists "edem_migrations_test"
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Mypy
+        run: uv run mypy .
+
+      - name: Pytest
+        run: uv run pytest
+
+      - name: Alembic upgrade
+        env:
+          ENVIRONMENT: development
+        run: uv run alembic upgrade head
+
+      - name: Alembic check (models == migrations)
+        env:
+          ENVIRONMENT: development
+        run: uv run alembic check
+
+  build-image:
+    name: Build & Integration Test Image
+    needs: test-and-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: edem_ci
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres -d edem_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+      redis:
+        image: redis:7
+        ports:
+          - "6379:6379"
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: edem-api
+          push: false
+          load: true
+          tags: edem-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test container
+        run: |
+          docker run -d --name edem-api --network host \
+            -e ENVIRONMENT=development \
+            -e SECRET_KEY=ci-only-secret \
+            -e DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/edem_ci \
+            -e TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/edem_test \
+            -e REDIS_URL=redis://localhost:6379/0 \
+            edem-api:ci
+
+          echo "Waiting for /health ..."
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health; then
+              echo
+              break
+            fi
+            sleep 2
+          done
+
+          curl -fsS http://127.0.0.1:8000/health
+          curl -fsS http://127.0.0.1:8000/v1/openapi.json > /dev/null
+          docker exec edem-api alembic upgrade head
+          echo "Container integration test passed"
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs edem-api || true
+
+      - name: Cleanup container
+        if: always()
+        run: docker rm -f edem-api || true
