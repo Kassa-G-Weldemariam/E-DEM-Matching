@@ -26,3 +26,10 @@ class EmailAlreadyRegisteredException(AppException):
         super().__init__(
             message=message, code="EMAIL_ALREADY_REGISTERED", status_code=409
         )
+
+
+class InvalidCurrentPasswordException(AppException):
+    def __init__(self, message: str = "The current password is incorrect"):
+        super().__init__(
+            message=message, code="INVALID_CURRENT_PASSWORD", status_code=400
+        )
