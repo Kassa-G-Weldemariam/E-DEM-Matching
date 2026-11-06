@@ -64,6 +64,9 @@ def make_blood_bank(
     approval_status: ApprovalStatus = ApprovalStatus.APPROVED,
     is_active: bool = True,
     name: str | None = None,
+    city: str = "Addis Ababa",
+    latitude: float = LATITUDE,
+    longitude: float = LONGITUDE,
 ) -> BloodBank:
     """A blood bank profile. Approved by default, to keep other tests short."""
     owner = user or make_user(db, UserRole.BLOOD_BANK)
@@ -71,9 +74,9 @@ def make_blood_bank(
         user_id=owner.id,
         name=name or f"Test Blood Bank {next(_counter)}",
         address="Churchill Avenue",
-        city="Addis Ababa",
-        latitude=LATITUDE,
-        longitude=LONGITUDE,
+        city=city,
+        latitude=latitude,
+        longitude=longitude,
         contact_phone="+251111234567",
         is_active=is_active,
         approval_status=approval_status,

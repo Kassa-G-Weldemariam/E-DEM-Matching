@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
 
+    # page size
+    DEFAULT_PAGE_SIZE: int = 10
+    MAX_PAGE_SIZE: int = 100
+
     # Matching parameters
     BLOOD_BANK_RESPONSE_TIMEOUT_MINUTES: int = 10
     DONOR_RESPONSE_TIMEOUT_MINUTES: int = 6
