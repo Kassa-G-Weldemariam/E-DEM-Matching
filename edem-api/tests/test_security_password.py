@@ -36,13 +36,17 @@ def test_garbage_hash_returns_false_instead_of_crashing():
 
 
 def test_fresh_hash_is_valid_and_needs_no_upgrade():
-    valid, new_hash = verify_and_upgrade("S3cure-password", hash_password("S3cure-password"))
+    valid, new_hash = verify_and_upgrade(
+        "S3cure-password", hash_password("S3cure-password")
+    )
     assert valid is True
     assert new_hash is None
 
 
 def test_wrong_password_never_returns_an_upgraded_hash():
-    valid, new_hash = verify_and_upgrade("wrong-password", hash_password("S3cure-password"))
+    valid, new_hash = verify_and_upgrade(
+        "wrong-password", hash_password("S3cure-password")
+    )
     assert valid is False
     assert new_hash is None
 
@@ -53,7 +57,9 @@ def test_garbage_hash_in_verify_and_upgrade_returns_false():
 
 def test_weak_old_hash_is_upgraded_after_a_correct_password():
     # A hash made with deliberately weak settings, like one saved by an older version of the app.
-    weak_hash = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1).hash("S3cure-password")
+    weak_hash = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1).hash(
+        "S3cure-password"
+    )
 
     valid, new_hash = verify_and_upgrade("S3cure-password", weak_hash)
 

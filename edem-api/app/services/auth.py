@@ -10,7 +10,9 @@ from app.schemas.auth import RegisterRequest
 
 
 def _is_email_unique_violation(error: IntegrityError) -> bool:
-    constraint_name = getattr(getattr(error.orig, "diag", None), "constraint_name", None)
+    constraint_name = getattr(
+        getattr(error.orig, "diag", None), "constraint_name", None
+    )
     if constraint_name == "uq_users_email":
         return True
 

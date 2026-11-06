@@ -26,6 +26,7 @@ async def app_exception_handler(request: Request, exc: AppException):
         content=error_response(message=exc.message, code=exc.code),
     )
 
+
 @app.exception_handler(RequestValidationError)
 async def validation_handler(request: Request, exc: RequestValidationError):
     fields = [{"field": e["loc"][-1], "message": e["msg"]} for e in exc.errors()]
@@ -48,5 +49,6 @@ def root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
 
 app.include_router(auth.router, prefix=settings.API_V1_STR)
