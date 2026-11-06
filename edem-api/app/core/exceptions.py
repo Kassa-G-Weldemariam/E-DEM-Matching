@@ -33,3 +33,10 @@ class InvalidCurrentPasswordException(AppException):
         super().__init__(
             message=message, code="INVALID_CURRENT_PASSWORD", status_code=400
         )
+
+
+class AccountNotApprovedException(AppException):
+    def __init__(
+        self, message: str = "This account has not been approved by an Admin yet"
+    ):
+        super().__init__(message=message, code="ACCOUNT_NOT_APPROVED", status_code=403)

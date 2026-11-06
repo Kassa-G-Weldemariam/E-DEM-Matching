@@ -5,12 +5,19 @@ from typing import Annotated
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ForbiddenException, UnauthorizedException
+from app.core.exceptions import (
+    AccountNotApprovedException,
+    ForbiddenException,
+    UnauthorizedException,
+)
 from app.core.security import TokenType, decode_token
 from app.db.session import get_db
-from app.models.enums import UserRole
+from app.models.blood_bank import BloodBank
+from app.models.enums import ApprovalStatus, UserRole
+from app.models.hospital import Hospital
 from app.models.user import User
 
 # auto_error=False: a missing header reaches our code, so the response uses the standard
@@ -75,3 +82,46 @@ DonorUser = Annotated[User, Depends(require_roles(UserRole.DONOR))]
 HospitalUser = Annotated[User, Depends(require_roles(UserRole.HOSPITAL))]
 BloodBankUser = Annotated[User, Depends(require_roles(UserRole.BLOOD_BANK))]
 AdminUser = Annotated[User, Depends(require_roles(UserRole.ADMIN))]
+
+
+# ---------------------------------------------------------------------------
+# Approval guards: action endpoints for hospitals and blood banks
+# ---------------------------------------------------------------------------
+
+
+def _ensure_approved(profile: Hospital | BloodBank | None, label: str) -> None:
+    if profile is None:
+        raise AccountNotApprovedException(
+            f"Create your {label} profile before using this feature"
+        )
+    if profile.approval_status == ApprovalStatus.PENDING:
+        raise AccountNotApprovedException(
+            f"Your {label} account is waiting for Admin approval"
+        )
+    if profile.approval_status != ApprovalStatus.APPROVED:
+        raise AccountNotApprovedException(f"Your {label} account has been suspended")
+
+
+def get_approved_hospital(user: HospitalUser, db: DbSession) -> Hospital:
+    """The caller's own hospital profile, only if an Admin has approved it."""
+    hospital = db.scalar(select(Hospital).where(Hospital.user_id == user.id))
+    _ensure_approved(hospital, "hospital")
+    assert (
+        hospital is not None
+    )  # _ensure_approved raised otherwise (this also helps mypy)
+    return hospital
+
+
+def get_approved_blood_bank(user: BloodBankUser, db: DbSession) -> BloodBank:
+    """The caller's own blood bank profile, only if an Admin has approved it."""
+    blood_bank = db.scalar(select(BloodBank).where(BloodBank.user_id == user.id))
+    _ensure_approved(blood_bank, "blood bank")
+    assert blood_bank is not None
+    return blood_bank
+
+
+# Use these on ACTION endpoints (create a request, fulfill a request, ...).
+# Profile endpoints must use plain HospitalUser / BloodBankUser, so a new
+# account can create its profile and a pending one can see its status.
+ApprovedHospital = Annotated[Hospital, Depends(get_approved_hospital)]
+ApprovedBloodBank = Annotated[BloodBank, Depends(get_approved_blood_bank)]
