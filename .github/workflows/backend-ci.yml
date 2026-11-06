@@ -57,7 +57,7 @@ jobs:
 
     env:
       ENVIRONMENT: test
-      SECRET_KEY: ci-secret-key-change-me
+      JWT_SECRET_KEY: ci-secret-key-change-me-and-at-least-32-chars
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/edem_ci
       TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/edem_test
       REDIS_URL: redis://localhost:6379/0
@@ -167,7 +167,7 @@ jobs:
         run: |
           docker run -d --name edem-api --network host \
             -e ENVIRONMENT=development \
-            -e SECRET_KEY=ci-only-secret \
+            -e JWT_SECRET_KEY=ci-only-secret-value-at-least-32-characters \
             -e DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/edem_ci \
             -e TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/edem_test \
             -e REDIS_URL=redis://localhost:6379/0 \

@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.api import auth
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.logging import setup_logging
@@ -24,6 +26,14 @@ async def app_exception_handler(request: Request, exc: AppException):
         content=error_response(message=exc.message, code=exc.code),
     )
 
+@app.exception_handler(RequestValidationError)
+async def validation_handler(request: Request, exc: RequestValidationError):
+    fields = [{"field": e["loc"][-1], "message": e["msg"]} for e in exc.errors()]
+    return JSONResponse(
+        status_code=422,
+        content=error_response("Validation failed", "VALIDATION_ERROR", fields),
+    )
+
 
 # Simple root endpoint to check if the API is running
 @app.get("/")
@@ -38,3 +48,5 @@ def root():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+app.include_router(auth.router, prefix=settings.API_V1_STR)

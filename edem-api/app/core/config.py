@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,9 +13,10 @@ class Settings(BaseSettings):
     TEST_DATABASE_URL: str
 
     # Auth
-    SECRET_KEY: str
-    ALGORITHM: str = "HS256"
+    JWT_SECRET_KEY: str
+    JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 14
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
@@ -35,6 +37,22 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=True,
     )
+
+    @model_validator(mode="after")
+    def validate_production_secret(self) -> "Settings":
+        if self.ENVIRONMENT == "production" and (
+            len(self.JWT_SECRET_KEY) < 32
+            or self.JWT_SECRET_KEY.lower()
+            in {
+                "change-this-to-a-long-random-secret-key",
+                "replace-with-a-random-secret",
+                "replace-with-a-random-secret-of-at-least-32-characters",
+            }
+        ):
+            raise ValueError(
+                "JWT_SECRET_KEY must be a random value of at least 32 characters in production"
+            )
+        return self
 
     @property
     def active_database_url(self) -> str:

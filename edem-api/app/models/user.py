@@ -7,7 +7,7 @@ from app.models.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
-    """Login credentials and role. Admin is just a role (no separate table)."""
+    """Login credentials and role.Admin is just a role (no separate table)."""
 
     __tablename__ = "users"
 

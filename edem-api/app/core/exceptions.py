@@ -19,3 +19,7 @@ class UnauthorizedException(AppException):
 class ForbiddenException(AppException):
     def __init__(self, message: str = "Forbidden"):
         super().__init__(message=message, code="FORBIDDEN", status_code=403)
+
+class EmailAlreadyRegisteredException(AppException):
+    def __init__(self, message: str = "This email is already registered"):
+        super().__init__(message=message, code="EMAIL_ALREADY_REGISTERED", status_code=409)
