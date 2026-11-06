@@ -17,7 +17,7 @@ settings = get_settings()
 # 3. Import app modules AFTER settings are cleared/reloaded
 from app.db.base import Base
 from app.db.session import get_db
-from app.main import app
+from app.main import app as fastapi_app  # ← renamed
 
 # 4. Engine setup
 engine = create_engine(settings.active_database_url)
@@ -33,6 +33,12 @@ def setup_test_db():
 
 
 @pytest.fixture
+def app():
+    """Expose the FastAPI instance so test modules can register test-only routes."""
+    return fastapi_app
+
+
+@pytest.fixture
 def db():
     """
     Wraps each test in an isolated transaction using savepoints
@@ -41,13 +47,9 @@ def db():
     connection = engine.connect()
     transaction = connection.begin()
 
-    # Bind session to the connection
     session = TestingSessionLocal(bind=connection)
-
-    # Begin a nested transaction (SAVEPOINT).
     session.begin_nested()
 
-    # Re-open a SAVEPOINT after application code commits or rolls it back.
     @event.listens_for(session, "after_transaction_end")
     def restart_savepoint(session, ended_transaction):
         if ended_transaction.nested and not ended_transaction.parent.nested:
@@ -71,9 +73,8 @@ def client(db):
         finally:
             pass
 
-    app.dependency_overrides[get_db] = override_get_db
-    with TestClient(app) as c:
+    fastapi_app.dependency_overrides[get_db] = override_get_db
+    with TestClient(fastapi_app) as c:
         yield c
 
-    # Clear overrides after test completion
-    app.dependency_overrides.clear()
+    fastapi_app.dependency_overrides.clear()
