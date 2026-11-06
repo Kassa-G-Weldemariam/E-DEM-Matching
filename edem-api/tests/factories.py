@@ -1,13 +1,23 @@
 """Helpers for creating test data."""
 
 import itertools
+from datetime import date
 
 from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
 from app.models.blood_bank import BloodBank
-from app.models.enums import ApprovalStatus, UserRole
+from app.models.blood_request import BloodRequest
+from app.models.donor import Donor
+from app.models.enums import (
+    ApprovalStatus,
+    BloodType,
+    Gender,
+    UserRole,
+    VerificationStatus,
+)
 from app.models.hospital import Hospital
+from app.models.match import Match
 from app.models.user import User
 
 _counter = itertools.count(1)
@@ -100,3 +110,78 @@ def make_hospital(
     db.commit()
     db.refresh(hospital)
     return hospital
+
+
+def make_donor(
+    db: Session,
+    *,
+    user: User | None = None,
+    blood_bank: BloodBank | None = None,
+    blood_type: BloodType = BloodType.O_POS,
+    verification_status: VerificationStatus = VerificationStatus.UNVERIFIED,
+) -> Donor:
+    """A donor profile (creates the donor user and a blood bank if none are given)."""
+    owner = user or make_user(db, UserRole.DONOR)
+    bank = blood_bank or make_blood_bank(db)
+    donor = Donor(
+        user_id=owner.id,
+        blood_bank_id=bank.id,
+        full_name=f"Test Donor {next(_counter)}",
+        blood_type=blood_type,
+        gender=Gender.FEMALE,
+        date_of_birth=date(1995, 1, 1),
+        weight_kg=65.0,
+        latitude=LATITUDE,
+        longitude=LONGITUDE,
+        verification_status=verification_status,
+    )
+    db.add(donor)
+    db.commit()
+    db.refresh(donor)
+    return donor
+
+
+def make_blood_request(
+    db: Session,
+    *,
+    hospital: Hospital | None = None,
+    blood_type: BloodType = BloodType.O_POS,
+    units_needed: int = 2,
+) -> BloodRequest:
+    """A blood request from the hospital, assigned to the hospital's primary blood bank."""
+    owner = hospital or make_hospital(db)
+    blood_request = BloodRequest(
+        hospital_id=owner.id,
+        blood_bank_id=owner.blood_bank_id,
+        blood_type=blood_type,
+        units_needed=units_needed,
+        latitude=owner.latitude,
+        longitude=owner.longitude,
+    )
+    db.add(blood_request)
+    db.commit()
+    db.refresh(blood_request)
+    return blood_request
+
+
+def make_match(
+    db: Session,
+    *,
+    blood_request: BloodRequest | None = None,
+    donor: Donor | None = None,
+    batch_number: int = 1,
+    distance_km: float = 3.5,
+) -> Match:
+    """A donor notified for a blood request."""
+    request_for_match = blood_request or make_blood_request(db)
+    donor_for_match = donor or make_donor(db)
+    match = Match(
+        request_id=request_for_match.id,
+        donor_id=donor_for_match.id,
+        batch_number=batch_number,
+        distance_km=distance_km,
+    )
+    db.add(match)
+    db.commit()
+    db.refresh(match)
+    return match
