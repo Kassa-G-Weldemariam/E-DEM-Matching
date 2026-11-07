@@ -45,3 +45,10 @@ class AccountNotApprovedException(AppException):
 class BadRequestException(AppException):
     def __init__(self, message: str = "Bad request"):
         super().__init__(message=message, code="BAD_REQUEST", status_code=400)
+
+
+class ProfileAlreadyExistsException(AppException):
+    def __init__(self, message: str = "You have already created a profile"):
+        super().__init__(
+            message=message, code="PROFILE_ALREADY_EXISTS", status_code=409
+        )
