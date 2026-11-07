@@ -91,3 +91,17 @@ def update_blood_bank_profile(
     db.commit()
     db.refresh(blood_bank)
     return blood_bank
+
+
+def get_available_blood_bank(db: Session, blood_bank_id: uuid.UUID) -> BloodBank | None:
+    """A blood bank that can be chosen as a primary bank: approved and operating.
+
+    These are the same rules as the public list.
+    """
+    return db.scalar(
+        select(BloodBank).where(
+            BloodBank.id == blood_bank_id,
+            BloodBank.approval_status == ApprovalStatus.APPROVED,
+            BloodBank.is_active.is_(True),
+        )
+    )

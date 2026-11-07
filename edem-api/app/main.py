@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.api import auth, blood_banks
+from app.api import auth, blood_banks, hospitals
 from app.core.config import get_settings
 from app.core.exceptions import AppException
 from app.core.logging import setup_logging
@@ -53,3 +53,4 @@ def health_check():
 
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(blood_banks.router, prefix=settings.API_V1_STR)
+app.include_router(hospitals.router, prefix=settings.API_V1_STR)
