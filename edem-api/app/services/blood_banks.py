@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.exceptions import ProfileAlreadyExistsException
+from app.core.exceptions import BadRequestException, ProfileAlreadyExistsException
 from app.core.geo import haversine_km
 from app.models.blood_bank import BloodBank
 from app.models.enums import ApprovalStatus
@@ -105,3 +105,9 @@ def get_available_blood_bank(db: Session, blood_bank_id: uuid.UUID) -> BloodBank
             BloodBank.is_active.is_(True),
         )
     )
+
+
+def require_available_blood_bank(db: Session, blood_bank_id: uuid.UUID) -> None:
+    """Raise 400 unless the blood bank is approved and operating."""
+    if get_available_blood_bank(db, blood_bank_id) is None:
+        raise BadRequestException("The selected blood bank is not available")

@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     DONORS_PER_BATCH: int = 15
     MAX_BATCHES: int = 3
     MIN_DAYS_BETWEEN_DONATIONS: int = 56
+    MIN_AGE_YEARS: int = 18
 
     # Environment switch
     ENVIRONMENT: str = "development"  # development | test | production

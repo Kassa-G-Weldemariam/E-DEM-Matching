@@ -11,11 +11,13 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import (
     AccountNotApprovedException,
     ForbiddenException,
+    NotFoundException,
     UnauthorizedException,
 )
 from app.core.security import TokenType, decode_token
 from app.db.session import get_db
 from app.models.blood_bank import BloodBank
+from app.models.donor import Donor
 from app.models.enums import ApprovalStatus, UserRole
 from app.models.hospital import Hospital
 from app.models.user import User
@@ -120,8 +122,27 @@ def get_approved_blood_bank(user: BloodBankUser, db: DbSession) -> BloodBank:
     return blood_bank
 
 
+# ---------------------------------------------------------------------------
+# Current donor
+# ---------------------------------------------------------------------------
+
+
+def get_current_donor(user: DonorUser, db: DbSession) -> Donor:
+    """The logged-in donor's own profile.
+
+    It does not check the verification status: a suspended donor can still log in and
+    see their profile. Endpoints that must refuse suspended donors (for example accepting
+    a request) check the status themselves.
+    """
+    donor = db.scalar(select(Donor).where(Donor.user_id == user.id))
+    if donor is None:
+        raise NotFoundException("You have not created your donor profile yet")
+    return donor
+
+
 # Use these on ACTION endpoints (create a request, fulfill a request, ...).
 # Profile endpoints must use plain HospitalUser / BloodBankUser, so a new
 # account can create its profile and a pending one can see its status.
 ApprovedHospital = Annotated[Hospital, Depends(get_approved_hospital)]
 ApprovedBloodBank = Annotated[BloodBank, Depends(get_approved_blood_bank)]
+CurrentDonor = Annotated[Donor, Depends(get_current_donor)]

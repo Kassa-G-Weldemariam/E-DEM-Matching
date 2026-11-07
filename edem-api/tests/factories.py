@@ -1,7 +1,7 @@
 """Helpers for creating test data."""
 
 import itertools
-from datetime import date
+from datetime import UTC, date, datetime
 
 from sqlalchemy.orm import Session
 
@@ -122,21 +122,35 @@ def make_donor(
     blood_bank: BloodBank | None = None,
     blood_type: BloodType = BloodType.O_POS,
     verification_status: VerificationStatus = VerificationStatus.UNVERIFIED,
+    is_available: bool = True,
+    last_donation_date: date | None = None,
+    full_name: str | None = None,
 ) -> Donor:
     """A donor profile (creates the donor user and a blood bank if none are given)."""
     owner = user or make_user(db, UserRole.DONOR)
     bank = blood_bank or make_blood_bank(db)
+    suspension: dict = {}
+    if verification_status == VerificationStatus.SUSPENDED:
+        # The database requires who, when and why for a suspended donor.
+        suspension = {
+            "suspended_by": make_user(db, UserRole.ADMIN).id,
+            "suspended_at": datetime.now(UTC),
+            "suspension_reason": "test reason",
+        }
     donor = Donor(
         user_id=owner.id,
         blood_bank_id=bank.id,
-        full_name=f"Test Donor {next(_counter)}",
+        full_name=full_name or f"Test Donor {next(_counter)}",
         blood_type=blood_type,
         gender=Gender.FEMALE,
         date_of_birth=date(1995, 1, 1),
         weight_kg=65.0,
         latitude=LATITUDE,
         longitude=LONGITUDE,
+        is_available=is_available,
+        last_donation_date=last_donation_date,
         verification_status=verification_status,
+        **suspension,
     )
     db.add(donor)
     db.commit()
