@@ -60,6 +60,7 @@ def list_blood_banks(
 # able to create its profile to get approved, and a pending bank has to see its status.
 # Keep these routes above any route that has an {id} in its path.
 
+
 @router.post("/profile", status_code=status.HTTP_201_CREATED)
 def create_profile(data: BloodBankProfileInput, user: BloodBankUser, db: DbSession):
     blood_bank = blood_bank_service.create_blood_bank_profile(db, user, data)
