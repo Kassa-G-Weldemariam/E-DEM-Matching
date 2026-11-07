@@ -1,6 +1,7 @@
+from datetime import timedelta
 from functools import lru_cache
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -26,7 +27,8 @@ class Settings(BaseSettings):
     MAX_PAGE_SIZE: int = 100
 
     # Matching parameters
-    BLOOD_BANK_RESPONSE_TIMEOUT_MINUTES: int = 10
+    BLOOD_BANK_RESPONSE_TIMEOUT_MINUTES: float = Field(10, gt=0)
+    BLOOD_BANK_RESPONSE_TIMEOUT_CRITICAL_MINUTES: float = Field(3, gt=0)
     DONOR_RESPONSE_TIMEOUT_MINUTES: int = 6
     MAX_MATCHING_RADIUS_KM: float = 25.0
     DONORS_PER_BATCH: int = 15
@@ -36,6 +38,15 @@ class Settings(BaseSettings):
 
     # Environment switch
     ENVIRONMENT: str = "development"  # development | test | production
+
+    def blood_bank_timeout(self, urgency: str) -> timedelta:
+        """Blood bank response time. Critical requests get the shorter timeout."""
+        minutes = (
+            self.BLOOD_BANK_RESPONSE_TIMEOUT_CRITICAL_MINUTES
+            if urgency == "critical"
+            else self.BLOOD_BANK_RESPONSE_TIMEOUT_MINUTES
+        )
+        return timedelta(minutes=minutes)
 
     model_config = SettingsConfigDict(
         env_file=".env",
