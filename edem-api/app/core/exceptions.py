@@ -52,3 +52,12 @@ class ProfileAlreadyExistsException(AppException):
         super().__init__(
             message=message, code="PROFILE_ALREADY_EXISTS", status_code=409
         )
+
+
+class InvalidStatusTransitionException(AppException):
+    def __init__(
+        self, message: str = "This action is no longer allowed in the current status"
+    ):
+        super().__init__(
+            message=message, code="INVALID_STATUS_TRANSITION", status_code=409
+        )

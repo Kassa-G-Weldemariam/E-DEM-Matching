@@ -2,8 +2,10 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from tests.db_utils import ensure_test_database
 
 # 1. Force the test environment
 os.environ["ENVIRONMENT"] = "test"
@@ -26,7 +28,8 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_db():
-    """Creates tables on test start and drops them when tests complete."""
+    """Creates the test database and its tables on test start, and drops the tables at the end."""
+    ensure_test_database(settings.TEST_DATABASE_URL)  # new line
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
@@ -41,26 +44,24 @@ def app():
 @pytest.fixture
 def db():
     """
-    Wraps each test in an isolated transaction using savepoints
-    so internal session.commit() calls inside application routes work cleanly.
+    Each test runs inside an outer transaction that is thrown away at the end.
+    join_transaction_mode="create_savepoint" makes the session's own commits and
+    rollbacks work on savepoints, so a rollback inside a test only undoes the work
+    since the last commit instead of wiping the whole test.
     """
     connection = engine.connect()
     transaction = connection.begin()
 
-    session = TestingSessionLocal(bind=connection)
-    session.begin_nested()
-
-    @event.listens_for(session, "after_transaction_end")
-    def restart_savepoint(session, ended_transaction):
-        if ended_transaction.nested and not ended_transaction.parent.nested:
-            session.begin_nested()
-
-    yield session
-
-    session.close()
-    if transaction.is_active:
-        transaction.rollback()
-    connection.close()
+    session = TestingSessionLocal(
+        bind=connection, join_transaction_mode="create_savepoint"
+    )
+    try:
+        yield session
+    finally:
+        session.close()
+        if transaction.is_active:
+            transaction.rollback()
+        connection.close()
 
 
 @pytest.fixture

@@ -13,6 +13,8 @@ from app.models.enums import (
     ApprovalStatus,
     BloodType,
     Gender,
+    RequestStatus,
+    Urgency,
     UserRole,
     VerificationStatus,
 )
@@ -164,6 +166,12 @@ def make_blood_request(
     hospital: Hospital | None = None,
     blood_type: BloodType = BloodType.O_POS,
     units_needed: int = 2,
+    status: RequestStatus = RequestStatus.PENDING_BLOOD_BANK,
+    urgency: Urgency = Urgency.NORMAL,
+    response_deadline: datetime | None = None,
+    donor_deadline: datetime | None = None,
+    units_from_inventory: int = 0,
+    units_confirmed: int = 0,
 ) -> BloodRequest:
     """A blood request from the hospital, assigned to the hospital's primary blood bank."""
     owner = hospital or make_hospital(db)
@@ -172,8 +180,14 @@ def make_blood_request(
         blood_bank_id=owner.blood_bank_id,
         blood_type=blood_type,
         units_needed=units_needed,
+        units_from_inventory=units_from_inventory,
+        units_confirmed=units_confirmed,
+        urgency=urgency,
+        status=status,
         latitude=owner.latitude,
         longitude=owner.longitude,
+        response_deadline=response_deadline,
+        donor_deadline=donor_deadline,
     )
     db.add(blood_request)
     db.commit()
