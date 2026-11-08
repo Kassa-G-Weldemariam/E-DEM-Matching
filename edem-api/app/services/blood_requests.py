@@ -59,11 +59,11 @@ def create_blood_request(
     db.refresh(blood_request)
 
     if status == RequestStatus.MATCHING_DONORS:
-        _start_matching_safely(db, blood_request)
+        start_matching_safely(db, blood_request)
     return blood_request
 
 
-def _start_matching_safely(db: Session, blood_request: BloodRequest) -> None:
+def start_matching_safely(db: Session, blood_request: BloodRequest) -> None:
     """The request already exists, so a failure here must not make the hospital's call fail.
 
     Later a request that is in matching_donors with no batch yet is exactly what

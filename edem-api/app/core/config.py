@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     MAX_BATCHES: int = 3
     MIN_DAYS_BETWEEN_DONATIONS: int = 56
     MIN_AGE_YEARS: int = 18
+    SWEEPER_INTERVAL_SECONDS: int = 15
+    ARRIVAL_WINDOW_MINUTES: int = 45
+    ACCEPTANCE_CAP_MULTIPLIER: float = 1.5
+    MIN_WEIGHT_KG: float = 50.0
 
     # Environment switch
     ENVIRONMENT: str = "development"  # development | test | production
