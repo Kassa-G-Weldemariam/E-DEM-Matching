@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     TEST_DATABASE_URL: str
 
+    # firebase
+    FIREBASE_CREDENTIALS_PATH: str | None = None
+
     # Auth
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
