@@ -8,10 +8,12 @@ from sqlalchemy.orm import Session
 from app.core.security import create_access_token
 from app.models.blood_bank import BloodBank
 from app.models.blood_request import BloodRequest
+from app.models.device_token import DeviceToken
 from app.models.donor import Donor
 from app.models.enums import (
     ApprovalStatus,
     BloodType,
+    DevicePlatform,
     Gender,
     RequestStatus,
     Urgency,
@@ -216,3 +218,23 @@ def make_match(
     db.commit()
     db.refresh(match)
     return match
+
+
+def make_device(
+    db: Session,
+    *,
+    user: User | None = None,
+    token: str | None = None,
+    platform: DevicePlatform | None = None,
+) -> DeviceToken:
+    """A registered device token for a user (a donor is created if no user is given)."""
+    owner = user or make_user(db, UserRole.DONOR)
+    device = DeviceToken(
+        user_id=owner.id,
+        token=token or f"test-device-token-{next(_counter)}-" + "x" * 40,
+        platform=platform,
+    )
+    db.add(device)
+    db.commit()
+    db.refresh(device)
+    return device

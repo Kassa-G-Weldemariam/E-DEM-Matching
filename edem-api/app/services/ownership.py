@@ -18,9 +18,11 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import ForbiddenException, NotFoundException
 from app.models.blood_bank import BloodBank
 from app.models.blood_request import BloodRequest
+from app.models.device_token import DeviceToken
 from app.models.donor import Donor
 from app.models.hospital import Hospital
 from app.models.match import Match
+from app.models.user import User
 
 T = TypeVar("T")
 
@@ -88,3 +90,11 @@ def get_match_for_hospital(
         # The match exists, but not as part of this request: from here it does not exist.
         raise NotFoundException("Match not found")
     return blood_request, match
+
+
+def get_device_for_user(db: Session, device_id: uuid.UUID, user: User) -> DeviceToken:
+    """A device token that belongs to the given user."""
+    device = _get_or_404(db, DeviceToken, device_id, "Device")
+    if device.user_id != user.id:
+        raise _not_yours("device")
+    return device
