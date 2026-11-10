@@ -2,7 +2,7 @@ import uuid
 
 from fastapi import APIRouter, Response, status
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, DonorUser
 from app.core.responses import success_response
 from app.schemas.device import DeviceRegisterRequest, DeviceResponse
 from app.services import devices as device_service
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/devices", tags=["Devices"])
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def register_device(
-    data: DeviceRegisterRequest, user: CurrentUser, db: DbSession, response: Response
+    data: DeviceRegisterRequest, user: DonorUser, db: DbSession, response: Response
 ):
     """Register or refresh this phone's push token. 201 when new, 200 when it already existed."""
     device, created = device_service.register_device(db, user, data)

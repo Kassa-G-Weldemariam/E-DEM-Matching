@@ -164,9 +164,18 @@ def test_fields_the_client_must_not_set_are_rejected(client, db, field):
     assert device_count(db) == 0
 
 
-@pytest.mark.parametrize("role", list(UserRole))
-def test_every_role_can_register_a_device(client, db, role):
-    assert post(client, make_user(db, role)).status_code == 201
+def test_a_donor_can_register_a_device(client, db):
+    assert post(client, donor(db)).status_code == 201
+
+
+@pytest.mark.parametrize(
+    "role", [UserRole.HOSPITAL, UserRole.BLOOD_BANK, UserRole.ADMIN]
+)
+def test_other_roles_cannot_register_a_device(client, db, role):
+    response = post(client, make_user(db, role))
+    assert response.status_code == 403
+    assert error_code(response) == "FORBIDDEN"
+    assert device_count(db) == 0
 
 
 def test_registering_requires_a_login(client, db):
