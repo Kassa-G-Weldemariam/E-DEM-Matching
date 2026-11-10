@@ -1,0 +1,60 @@
+name: Mobile CI
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'edem-mobile/**'
+      - '.github/workflows/mobile-ci.yml'
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'edem-mobile/**'
+      - '.github/workflows/mobile-ci.yml'
+
+concurrency:
+  group: mobile-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Mobile Lint, Test & Bundle
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: edem-mobile
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24   
+          cache: npm
+          cache-dependency-path: edem-mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Check formatting (Prettier)
+        run: npm run format
+
+      - name: Type check (TypeScript)
+        run: npm run typecheck
+
+      - name: Tests (Jest)
+        run: npm test -- --ci
+
+      - name: Expo health check
+        run: npx expo-doctor
+        continue-on-error: true
+
+      # Builds the JavaScript bundle. Catches broken imports and missing files without a
+      # native build. The address is a placeholder: it is only compiled in.
+      - name: Bundle the app (Android)
+        env:
+          EXPO_PUBLIC_API_URL: https://api.example.invalid/v1
+        run: npx expo export --platform android
