@@ -22,11 +22,17 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      "expo-notifications",
-      "expo-router",
-      "expo-secure-store",
-      ["expo-build-properties", { "android": { "useCleartextTraffic": true } }]
-    ]
+    "plugins": ["expo-notifications", "expo-router", "expo-secure-store"],
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "8450b36c-5989-484f-8b88-db0248e883a5"
+      }
+    },
+    "owner": "kassag"
   }
 }
