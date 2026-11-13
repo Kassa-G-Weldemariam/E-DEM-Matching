@@ -4,9 +4,11 @@ Run from the edem-api folder:
 
     uv run python -m scripts.send_test_push --email donor@edem-demo.org
     uv run python -m scripts.send_test_push --email donor@edem-demo.org --delay 20
+    uv run python -m scripts.send_test_push --email donor@edem-demo.org --ttl 30
     uv run python -m scripts.send_test_push --email donor@edem-demo.org --dry-run
 
 --delay waits before sending, so you can lock the phone or close the app first.
+--ttl is how many seconds Firebase keeps the message if the phone is offline.
 --dry-run only lists the devices. It refuses to run when ENVIRONMENT=production.
 """
 
@@ -15,7 +17,7 @@ import sys
 import time
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.engine import make_url
@@ -26,6 +28,7 @@ from app.db.session import get_session_factory
 from app.models.device_token import DeviceToken
 from app.models.user import User
 from app.services.push import (
+    DEFAULT_TTL,
     PushClient,
     PushNotConfiguredError,
     get_push_client,
@@ -38,16 +41,22 @@ SessionProvider = Callable[[], AbstractContextManager[Session]]
 DEFAULT_TITLE = "E-DEM test"
 DEFAULT_BODY = "If you can read this, push notifications work on this phone."
 MAX_DELAY_SECONDS = 300
+MAX_TTL_SECONDS = 3600
 
 
-def _delay(value: str) -> int:
-    try:
-        number = int(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError("must be a whole number") from None
-    if not 0 <= number <= MAX_DELAY_SECONDS:
-        raise argparse.ArgumentTypeError(f"must be between 0 and {MAX_DELAY_SECONDS}")
-    return number
+def _bounded_int(name: str, maximum: int, minimum: int = 0) -> Callable[[str], int]:
+    def parse(value: str) -> int:
+        try:
+            number = int(value)
+        except ValueError:
+            raise argparse.ArgumentTypeError("must be a whole number") from None
+        if not minimum <= number <= maximum:
+            raise argparse.ArgumentTypeError(
+                f"{name} must be between {minimum} and {maximum}"
+            )
+        return number
+
+    return parse
 
 
 def main(
@@ -64,9 +73,15 @@ def main(
     parser.add_argument("--body", default=DEFAULT_BODY)
     parser.add_argument(
         "--delay",
-        type=_delay,
+        type=_bounded_int("delay", MAX_DELAY_SECONDS),
         default=0,
-        help="seconds to wait before sending (0 to 300)",
+        help="seconds to wait before sending",
+    )
+    parser.add_argument(
+        "--ttl",
+        type=_bounded_int("ttl", MAX_TTL_SECONDS, minimum=1),
+        default=None,
+        help=f"seconds Firebase keeps the message when the phone is offline (default {int(DEFAULT_TTL.total_seconds())})",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="list the devices and send nothing"
@@ -130,15 +145,23 @@ def main(
             )
             sleep(args.delay)
 
+        sent_at = datetime.now(UTC)
         report = send_push_to_user(
             db,
             user.id,
             args.title,
             args.body,
-            data={"type": "test", "sent_at": datetime.now(UTC).isoformat()},
+            data={
+                "type": "test",
+                "sent_at": sent_at.isoformat(timespec="milliseconds"),
+            },
             client=sender,
+            ttl=timedelta(seconds=args.ttl) if args.ttl else DEFAULT_TTL,
         )
 
+    print(
+        f"Sent at {sent_at:%H:%M:%S} UTC ({sent_at.astimezone():%H:%M:%S} on this computer)"
+    )
     for result in report.results:
         print(
             f"{result.outcome.value.upper():<12}{result.token_start:<14}{result.detail}"

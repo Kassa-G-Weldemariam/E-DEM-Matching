@@ -16,4 +16,5 @@ export const styles = StyleSheet.create({
   detail: { fontSize: 13, color: "#555" },
   error: { fontSize: 13, color: "#b3261e" },
   logLine: { fontSize: 12, color: "#222", fontFamily: "monospace" },
+  panel: { gap: 10 },
 });

@@ -1,4 +1,6 @@
+import re
 from contextlib import nullcontext
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -6,7 +8,7 @@ from sqlalchemy import select
 
 from app.models.device_token import DeviceToken
 from app.models.enums import UserRole
-from app.services.push import PushNotConfiguredError
+from app.services.push import DEFAULT_TTL, PushNotConfiguredError
 from scripts import send_test_push as cli
 from tests.factories import make_device, make_user
 
@@ -228,3 +230,41 @@ def test_it_shows_the_database_without_its_password(db, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "dbhost" in out
     assert "top-secret-db-pw" not in out
+
+
+# --------------------------------------------------- send time and time limit
+
+
+def test_the_send_time_is_in_the_payload_with_millisecond_precision(db):
+    donor_with_devices(db)
+    client = FakeClient()
+    run(db, client=client)
+    sent_at = client.calls[0].data["sent_at"]
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+00:00", sent_at)
+
+
+def test_the_send_time_is_printed(db, capsys):
+    donor_with_devices(db)
+    run(db, client=FakeClient())
+    assert "Sent at" in capsys.readouterr().out
+
+
+def test_a_time_limit_can_be_given_in_seconds(db):
+    donor_with_devices(db)
+    client = FakeClient()
+    run(db, "--ttl", "45", client=client)
+    assert client.calls[0].ttl == timedelta(seconds=45)
+
+
+def test_the_default_time_limit_is_used_without_the_option(db):
+    donor_with_devices(db)
+    client = FakeClient()
+    run(db, client=client)
+    assert client.calls[0].ttl == DEFAULT_TTL
+
+
+@pytest.mark.parametrize("ttl", ["0", "-1", "3601", "abc"])
+def test_a_time_limit_out_of_range_is_refused(db, ttl):
+    with pytest.raises(SystemExit) as exit_info:
+        run(db, "--ttl", ttl, client=FakeClient())
+    assert exit_info.value.code == 2

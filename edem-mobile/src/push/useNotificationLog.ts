@@ -1,3 +1,4 @@
+import { latencyText } from "./latency";
 import * as Notifications from "expo-notifications";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -20,7 +21,9 @@ export function useNotificationLog(limit = 30) {
 
   useEffect(() => {
     const subscription = Notifications.addNotificationReceivedListener((notification) =>
-      add(`RECEIVED (app open): ${describeNotification(notification)}`),
+      add(
+        `RECEIVED (app open): ${describeNotification(notification)}${latencyText(notification.request.content.data)}`,
+      ),
     );
     return () => subscription.remove();
   }, [add]);
