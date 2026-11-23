@@ -1,17 +1,23 @@
 import uuid
+from collections import Counter
+from typing import Annotated
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import ApprovedHospital, DbSession, HospitalUser
+from app.api.pagination import PageDep, paginated
+from app.api.request_views import history_item, match_item
 from app.core.exceptions import NotFoundException
 from app.core.responses import success_response
 from app.models.blood_bank import BloodBank
+from app.models.enums import RequestStatus
 from app.models.hospital import Hospital
 from app.schemas.blood_request import BloodRequestCreate, BloodRequestResponse
 from app.schemas.hospital import HospitalProfileInput, HospitalProfileResponse
 from app.services import blood_requests as blood_request_service
 from app.services import hospitals as hospital_service
+from app.services import request_queries
 from app.services.ownership import get_request_for_hospital
 
 router = APIRouter(prefix="/hospitals", tags=["Hospitals"])
@@ -72,4 +78,49 @@ def get_request(request_id: uuid.UUID, hospital: ApprovedHospital, db: DbSession
     blood_request = get_request_for_hospital(db, request_id, hospital)
     return success_response(
         BloodRequestResponse.model_validate(blood_request).model_dump(mode="json")
+    )
+
+
+@router.get("/requests")
+def list_requests(
+    hospital: ApprovedHospital,
+    db: DbSession,
+    page: PageDep,
+    status_filter: Annotated[
+        RequestStatus | None,
+        Query(alias="status", description="Only requests in this status"),
+    ] = None,
+):
+    rows, total = request_queries.list_hospital_requests(
+        db, hospital.id, status=status_filter, limit=page.page_size, offset=page.offset
+    )
+    items = [
+        BloodRequestResponse.model_validate(row).model_dump(mode="json") for row in rows
+    ]
+    return success_response(paginated(items, total, page))
+
+
+@router.get("/requests/{request_id}/history")
+def get_request_history(
+    request_id: uuid.UUID, hospital: ApprovedHospital, db: DbSession
+):
+    blood_request = get_request_for_hospital(db, request_id, hospital)
+    entries = request_queries.list_request_history(db, blood_request.id)
+    return success_response(
+        {"items": [history_item(entry).model_dump(mode="json") for entry in entries]}
+    )
+
+
+@router.get("/requests/{request_id}/matches")
+def list_request_matches(
+    request_id: uuid.UUID, hospital: ApprovedHospital, db: DbSession
+):
+    blood_request = get_request_for_hospital(db, request_id, hospital)
+    entries = request_queries.list_request_matches(db, blood_request.id)
+    counts = Counter(entry.match.status.value for entry in entries)
+    return success_response(
+        {
+            "items": [match_item(entry).model_dump(mode="json") for entry in entries],
+            "counts": dict(counts),
+        }
     )

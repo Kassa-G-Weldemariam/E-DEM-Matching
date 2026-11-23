@@ -87,3 +87,10 @@ class BloodRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
     fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    @property
+    def units_remaining(self) -> int:
+        """Units still needed from donors: what was asked, minus stock and confirmed donations."""
+        return max(
+            0, self.units_needed - self.units_from_inventory - self.units_confirmed
+        )

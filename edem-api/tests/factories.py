@@ -15,6 +15,7 @@ from app.models.enums import (
     BloodType,
     DevicePlatform,
     Gender,
+    MatchStatus,
     RequestStatus,
     Urgency,
     UserRole,
@@ -22,6 +23,7 @@ from app.models.enums import (
 )
 from app.models.hospital import Hospital
 from app.models.match import Match
+from app.models.request_status_history import RequestStatusHistory
 from app.models.user import User
 
 _counter = itertools.count(1)
@@ -174,9 +176,12 @@ def make_blood_request(
     donor_deadline: datetime | None = None,
     units_from_inventory: int = 0,
     units_confirmed: int = 0,
+    created_at: datetime | None = None,
+    notes: str | None = None,
 ) -> BloodRequest:
     """A blood request from the hospital, assigned to the hospital's primary blood bank."""
     owner = hospital or make_hospital(db)
+    extra = {"created_at": created_at} if created_at else {}
     blood_request = BloodRequest(
         hospital_id=owner.id,
         blood_bank_id=owner.blood_bank_id,
@@ -190,6 +195,8 @@ def make_blood_request(
         longitude=owner.longitude,
         response_deadline=response_deadline,
         donor_deadline=donor_deadline,
+        notes=notes,
+        **extra,
     )
     db.add(blood_request)
     db.commit()
@@ -204,15 +211,20 @@ def make_match(
     donor: Donor | None = None,
     batch_number: int = 1,
     distance_km: float = 3.5,
+    status: MatchStatus = MatchStatus.NOTIFIED,
+    notified_at: datetime | None = None,
 ) -> Match:
     """A donor notified for a blood request."""
     request_for_match = blood_request or make_blood_request(db)
     donor_for_match = donor or make_donor(db)
+    extra = {"notified_at": notified_at} if notified_at else {}
     match = Match(
         request_id=request_for_match.id,
         donor_id=donor_for_match.id,
         batch_number=batch_number,
         distance_km=distance_km,
+        status=status,
+        **extra,
     )
     db.add(match)
     db.commit()
@@ -238,3 +250,29 @@ def make_device(
     db.commit()
     db.refresh(device)
     return device
+
+
+def make_history(
+    db: Session,
+    blood_request: BloodRequest,
+    from_status: RequestStatus | None,
+    to_status: RequestStatus,
+    *,
+    changed_by: User | None = None,
+    note: str | None = None,
+    created_at: datetime | None = None,
+) -> RequestStatusHistory:
+    """One row of a request's status history."""
+    extra = {"created_at": created_at} if created_at else {}
+    row = RequestStatusHistory(
+        request_id=blood_request.id,
+        from_status=from_status,
+        to_status=to_status,
+        changed_by=changed_by.id if changed_by else None,
+        note=note,
+        **extra,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row

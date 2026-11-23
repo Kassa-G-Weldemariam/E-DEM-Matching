@@ -1,7 +1,12 @@
-from fastapi import APIRouter, status
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentDonor, DbSession, DonorUser
+from app.api.pagination import PageDep, paginated
+from app.api.request_views import donor_request_item
 from app.core.exceptions import NotFoundException
 from app.core.responses import success_response
 from app.models.blood_bank import BloodBank
@@ -13,6 +18,8 @@ from app.schemas.donor import (
     DonorProfileUpdate,
 )
 from app.services import donors as donor_service
+from app.services import request_queries
+from app.services.ownership import get_match_for_donor
 
 router = APIRouter(prefix="/donors", tags=["Donors"])
 
@@ -53,3 +60,27 @@ def update_profile(data: DonorProfileUpdate, donor: CurrentDonor, db: DbSession)
 def update_availability(data: AvailabilityRequest, donor: CurrentDonor, db: DbSession):
     donor = donor_service.set_availability(db, donor, data.is_available)
     return success_response(_profile_response(db, donor), "Availability updated")
+
+
+@router.get("/requests")
+def list_requests(
+    donor: CurrentDonor,
+    db: DbSession,
+    page: PageDep,
+    open_only: Annotated[
+        bool, Query(description="Only requests still in progress for this donor")
+    ] = False,
+):
+    """The requests sent to this donor. This is also the fallback screen when a push never arrives."""
+    entries, total = request_queries.list_donor_requests(
+        db, donor, open_only=open_only, limit=page.page_size, offset=page.offset
+    )
+    items = [donor_request_item(entry).model_dump(mode="json") for entry in entries]
+    return success_response(paginated(items, total, page))
+
+
+@router.get("/requests/{match_id}")
+def get_request(match_id: uuid.UUID, donor: CurrentDonor, db: DbSession):
+    match = get_match_for_donor(db, match_id, donor)
+    entry = request_queries.get_donor_request(db, match, donor)
+    return success_response(donor_request_item(entry).model_dump(mode="json"))
