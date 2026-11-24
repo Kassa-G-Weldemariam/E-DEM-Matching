@@ -9,6 +9,7 @@ import pytest
 from app.core.config import get_settings
 from app.core.geo import haversine_km
 from app.models.enums import BloodType as B
+from app.models.enums import Gender as G
 from app.models.enums import VerificationStatus as V
 from app.services.matching_rules import (
     DonorCandidate,
@@ -25,7 +26,13 @@ from tests.geo_helpers import destination
 TODAY = date(2026, 11, 20)
 HOSPITAL = (9.03, 38.74)
 RULES = MatchingRules(
-    min_age_years=18, min_weight_kg=50, min_days_between_donations=56, max_radius_km=25
+    min_age_years=18,
+    upper_age_limit_years=65,
+    min_weight_kg=50,
+    min_days_male=90,
+    min_days_female=120,
+    max_radius_km=25,
+    distance_band_km=2,
 )
 
 
@@ -33,19 +40,28 @@ def at_km(km: float, bearing: float = 90.0) -> tuple[float, float]:
     return destination(*HOSPITAL, bearing, km)
 
 
+def spot(km: float, bearing: float = 90.0) -> dict[str, float]:
+    latitude, longitude = at_km(km, bearing)
+    return {"latitude": latitude, "longitude": longitude}
+
+
+def born_aged(years: int) -> date:
+    """A birth date that makes the donor exactly this old on TODAY."""
+    return TODAY.replace(year=TODAY.year - years)
+
+
 def make(**overrides: Any) -> DonorCandidate:
-    latitude, longitude = at_km(5)
     fields: dict[str, Any] = {
         "donor_id": uuid.uuid4(),
         "blood_type": B.O_POS,
-        "latitude": latitude,
-        "longitude": longitude,
+        "gender": G.MALE,
         "date_of_birth": date(1995, 1, 1),
         "weight_kg": 65.0,
         "last_donation_date": None,
         "is_available": True,
         "account_active": True,
         "verification_status": V.UNVERIFIED,
+        **spot(5),
     }
     fields.update(overrides)
     return DonorCandidate(**fields)
@@ -135,7 +151,7 @@ def test_a_donor_one_day_short_of_18_is_refused():
     [(date(2026, 2, 28), Rejection.TOO_YOUNG), (date(2026, 3, 1), None)],
     ids=["28 February", "1 March"],
 )
-def test_a_leap_day_birthday_counts_from_1_march(today, expected):
+def test_a_leap_day_birthday_counts_from_1_march_for_the_minimum_age(today, expected):
     assert reason(make(date_of_birth=date(2008, 2, 29)), today=today) == expected
 
 
@@ -147,6 +163,51 @@ def test_a_leap_day_birthday_counts_from_1_march(today, expected):
 def test_the_minimum_age_comes_from_the_rules(born, expected):
     rules = dataclasses.replace(RULES, min_age_years=21)
     assert reason(make(date_of_birth=born), rules=rules) == expected
+
+
+@pytest.mark.parametrize(
+    "age,expected",
+    [
+        (17, Rejection.TOO_YOUNG),
+        (18, None),
+        (64, None),
+        (65, Rejection.TOO_OLD),
+        (80, Rejection.TOO_OLD),
+    ],
+)
+def test_only_ages_18_to_64_are_accepted(age, expected):
+    assert reason(make(date_of_birth=born_aged(age))) == expected
+
+
+def test_a_donor_who_turns_65_today_is_refused():
+    assert reason(make(date_of_birth=date(1961, 11, 20))) == Rejection.TOO_OLD
+
+
+def test_a_donor_who_turns_65_tomorrow_is_still_accepted():
+    assert reason(make(date_of_birth=date(1961, 11, 21))) is None
+
+
+@pytest.mark.parametrize(
+    "today,expected",
+    [(date(2025, 2, 28), None), (date(2025, 3, 1), Rejection.TOO_OLD)],
+    ids=["28 February", "1 March"],
+)
+def test_a_leap_day_birthday_counts_from_1_march_for_the_upper_limit(today, expected):
+    assert reason(make(date_of_birth=date(1960, 2, 29)), today=today) == expected
+
+
+@pytest.mark.parametrize(
+    "born,expected",
+    [(date(1966, 11, 21), None), (date(1966, 11, 20), Rejection.TOO_OLD)],
+    ids=["59 years old", "exactly 60"],
+)
+def test_the_upper_age_limit_comes_from_the_rules(born, expected):
+    rules = dataclasses.replace(RULES, upper_age_limit_years=60)
+    assert reason(make(date_of_birth=born), rules=rules) == expected
+
+
+def test_a_very_old_donor_is_refused():
+    assert reason(make(date_of_birth=date(1930, 1, 1))) == Rejection.TOO_OLD
 
 
 # ---------------------------------------------------------------- weight
@@ -167,59 +228,94 @@ def test_the_minimum_weight_comes_from_the_rules():
 # -------------------------------------------------------- waiting period
 
 
-def test_a_donor_who_never_donated_is_accepted():
-    assert reason(make(last_donation_date=None)) is None
+@pytest.mark.parametrize("gender", [G.MALE, G.FEMALE])
+def test_a_donor_who_never_donated_is_accepted(gender):
+    assert reason(make(gender=gender, last_donation_date=None)) is None
 
 
-def test_a_donor_is_eligible_again_on_day_56():
-    assert reason(make(last_donation_date=TODAY - timedelta(days=56))) is None
-
-
-def test_a_donor_is_not_eligible_on_day_55():
+def test_a_man_is_eligible_again_on_day_90():
     assert (
-        reason(make(last_donation_date=TODAY - timedelta(days=55)))
-        == Rejection.DONATED_RECENTLY
+        reason(make(gender=G.MALE, last_donation_date=TODAY - timedelta(days=90)))
+        is None
     )
 
 
-def test_a_donor_who_donated_today_is_refused():
-    assert reason(make(last_donation_date=TODAY)) == Rejection.DONATED_RECENTLY
+def test_a_man_is_not_eligible_on_day_89():
+    candidate = make(gender=G.MALE, last_donation_date=TODAY - timedelta(days=89))
+    assert reason(candidate) == Rejection.DONATED_RECENTLY
+
+
+def test_a_woman_is_eligible_again_on_day_120():
+    assert (
+        reason(make(gender=G.FEMALE, last_donation_date=TODAY - timedelta(days=120)))
+        is None
+    )
+
+
+def test_a_woman_is_not_eligible_on_day_119():
+    candidate = make(gender=G.FEMALE, last_donation_date=TODAY - timedelta(days=119))
+    assert reason(candidate) == Rejection.DONATED_RECENTLY
+
+
+@pytest.mark.parametrize(
+    "gender,expected", [(G.MALE, None), (G.FEMALE, Rejection.DONATED_RECENTLY)]
+)
+def test_the_same_donation_date_can_be_fine_for_a_man_and_too_recent_for_a_woman(
+    gender, expected
+):
+    assert (
+        reason(make(gender=gender, last_donation_date=TODAY - timedelta(days=100)))
+        == expected
+    )
+
+
+@pytest.mark.parametrize("gender", [G.MALE, G.FEMALE])
+def test_a_donor_who_donated_today_is_refused(gender):
+    assert (
+        reason(make(gender=gender, last_donation_date=TODAY))
+        == Rejection.DONATED_RECENTLY
+    )
 
 
 def test_a_donation_long_ago_is_fine():
     assert reason(make(last_donation_date=date(2020, 1, 1))) is None
 
 
-def test_a_donation_date_in_the_future_is_refused():
-    assert (
-        reason(make(last_donation_date=TODAY + timedelta(days=1)))
-        == Rejection.DONATED_RECENTLY
-    )
+@pytest.mark.parametrize("gender", [G.MALE, G.FEMALE])
+def test_a_donation_date_in_the_future_is_refused(gender):
+    candidate = make(gender=gender, last_donation_date=TODAY + timedelta(days=1))
+    assert reason(candidate) == Rejection.DONATED_RECENTLY
 
 
 @pytest.mark.parametrize(
-    "days,expected", [(89, Rejection.DONATED_RECENTLY), (90, None)]
+    "gender,days,expected",
+    [
+        (G.MALE, 59, Rejection.DONATED_RECENTLY),
+        (G.MALE, 60, None),
+        (G.FEMALE, 79, Rejection.DONATED_RECENTLY),
+        (G.FEMALE, 80, None),
+    ],
 )
-def test_the_waiting_period_comes_from_the_rules(days, expected):
-    rules = dataclasses.replace(RULES, min_days_between_donations=90)
-    assert (
-        reason(make(last_donation_date=TODAY - timedelta(days=days)), rules=rules)
-        == expected
-    )
+def test_the_waiting_periods_come_from_the_rules(gender, days, expected):
+    rules = dataclasses.replace(RULES, min_days_male=60, min_days_female=80)
+    candidate = make(gender=gender, last_donation_date=TODAY - timedelta(days=days))
+    assert reason(candidate, rules=rules) == expected
+
+
+def test_the_rules_report_the_waiting_period_of_each_gender():
+    assert RULES.waiting_days(G.MALE) == 90
+    assert RULES.waiting_days(G.FEMALE) == 120
 
 
 # -------------------------------------------------------------- distance
 
 
 def test_a_donor_just_inside_the_radius_is_accepted():
-    assert reason(make(latitude=at_km(24.9)[0], longitude=at_km(24.9)[1])) is None
+    assert reason(make(**spot(24.9))) is None
 
 
 def test_a_donor_just_outside_the_radius_is_refused():
-    assert (
-        reason(make(latitude=at_km(25.1)[0], longitude=at_km(25.1)[1]))
-        == Rejection.TOO_FAR
-    )
+    assert reason(make(**spot(25.1))) == Rejection.TOO_FAR
 
 
 def test_a_donor_at_the_hospital_is_accepted():
@@ -227,7 +323,7 @@ def test_a_donor_at_the_hospital_is_accepted():
 
 
 def test_a_donor_exactly_at_the_limit_is_accepted():
-    candidate = make(latitude=at_km(25)[0], longitude=at_km(25)[1])
+    candidate = make(**spot(25))
     limit = haversine_km(*HOSPITAL, candidate.latitude, candidate.longitude)
     assert (
         reason(candidate, rules=dataclasses.replace(RULES, max_radius_km=limit)) is None
@@ -236,20 +332,18 @@ def test_a_donor_exactly_at_the_limit_is_accepted():
 
 @pytest.mark.parametrize("bearing", [0, 90, 180, 270])
 def test_a_donor_inside_the_radius_is_accepted_in_every_direction(bearing):
-    latitude, longitude = at_km(24, bearing)
-    assert reason(make(latitude=latitude, longitude=longitude)) is None
+    assert reason(make(**spot(24, bearing))) is None
 
 
 @pytest.mark.parametrize("bearing", [0, 90, 180, 270])
 def test_a_donor_outside_the_radius_is_refused_in_every_direction(bearing):
-    latitude, longitude = at_km(26, bearing)
-    assert reason(make(latitude=latitude, longitude=longitude)) == Rejection.TOO_FAR
+    assert reason(make(**spot(26, bearing))) == Rejection.TOO_FAR
 
 
 # ------------------------------------------------- which reason is reported
 
 
-FAR = {"latitude": at_km(30)[0], "longitude": at_km(30)[1]}
+FAR = spot(30)
 PRECEDENCE = [
     ({"blood_type": B.A_POS, "account_active": False}, Rejection.NOT_COMPATIBLE),
     (
@@ -259,6 +353,7 @@ PRECEDENCE = [
     ({"verification_status": V.SUSPENDED, "is_available": False}, Rejection.SUSPENDED),
     ({"is_available": False, "date_of_birth": date(2015, 1, 1)}, Rejection.UNAVAILABLE),
     ({"date_of_birth": date(2015, 1, 1), "weight_kg": 30.0}, Rejection.TOO_YOUNG),
+    ({"date_of_birth": date(1950, 1, 1), "weight_kg": 30.0}, Rejection.TOO_OLD),
     ({"weight_kg": 30.0, "last_donation_date": TODAY}, Rejection.UNDERWEIGHT),
     ({"last_donation_date": TODAY, **FAR}, Rejection.DONATED_RECENTLY),
 ]
@@ -272,47 +367,55 @@ def test_a_donor_failing_several_rules_is_reported_under_the_first(fields, expec
 
 
 # ================================================================ ranking
+# Distance bands are 2 km wide in these tests: 0-2 km is band 0, 2-4 km is band 1, and so on.
 
 
-def test_a_verified_donor_comes_before_an_unverified_one_even_if_farther():
-    near_unverified = make(latitude=at_km(1)[0], longitude=at_km(1)[1])
-    far_verified = make(
-        latitude=at_km(20)[0], longitude=at_km(20)[1], verification_status=V.VERIFIED
-    )
-    assert ranked_ids([near_unverified, far_verified]) == [
-        far_verified.donor_id,
-        near_unverified.donor_id,
+def test_a_nearer_band_beats_being_verified_or_an_exact_match():
+    near = make(blood_type=B.O_NEG, **spot(1))  # unverified, compatible only
+    far = make(blood_type=B.O_POS, verification_status=V.VERIFIED, **spot(20))
+    assert ranked_ids([far, near]) == [near.donor_id, far.donor_id]
+
+
+def test_in_the_same_band_a_verified_donor_comes_first_even_if_farther():
+    nearer_unverified = make(**spot(0.5))
+    farther_verified = make(verification_status=V.VERIFIED, **spot(1.5))
+    assert ranked_ids([nearer_unverified, farther_verified]) == [
+        farther_verified.donor_id,
+        nearer_unverified.donor_id,
     ]
 
 
-def test_an_exact_blood_type_comes_before_a_compatible_one_even_if_farther():
-    near_compatible = make(
-        blood_type=B.O_NEG, latitude=at_km(1)[0], longitude=at_km(1)[1]
-    )
-    far_exact = make(blood_type=B.A_POS, latitude=at_km(20)[0], longitude=at_km(20)[1])
-    assert ranked_ids([near_compatible, far_exact], requested=B.A_POS) == [
-        far_exact.donor_id,
-        near_compatible.donor_id,
+def test_in_the_same_band_an_exact_blood_type_comes_first_even_if_farther():
+    nearer_compatible = make(blood_type=B.O_NEG, **spot(0.5))
+    farther_exact = make(blood_type=B.O_POS, **spot(1.5))
+    assert ranked_ids([nearer_compatible, farther_exact]) == [
+        farther_exact.donor_id,
+        nearer_compatible.donor_id,
     ]
 
 
-def test_being_verified_outranks_having_the_exact_blood_type():
-    verified_compatible = make(blood_type=B.O_NEG, verification_status=V.VERIFIED)
-    unverified_exact = make(blood_type=B.A_POS)
-    assert ranked_ids([unverified_exact, verified_compatible], requested=B.A_POS) == [
+def test_in_the_same_band_being_verified_outranks_an_exact_blood_type():
+    verified_compatible = make(
+        blood_type=B.O_NEG, verification_status=V.VERIFIED, **spot(1.5)
+    )
+    unverified_exact = make(blood_type=B.O_POS, **spot(0.5))
+    assert ranked_ids([unverified_exact, verified_compatible]) == [
         verified_compatible.donor_id,
         unverified_exact.donor_id,
     ]
 
 
-def test_the_nearest_donor_comes_first_within_the_same_group():
-    far, middle, near = (
-        make(latitude=at_km(km)[0], longitude=at_km(km)[1]) for km in (20, 10, 2)
-    )
-    assert ranked_ids([far, near, middle]) == [
-        near.donor_id,
-        middle.donor_id,
-        far.donor_id,
+def test_in_the_same_band_and_group_the_nearest_comes_first():
+    far, near = make(**spot(1.5)), make(**spot(0.5))
+    assert ranked_ids([far, near]) == [near.donor_id, far.donor_id]
+
+
+def test_a_donor_just_across_a_band_boundary_ranks_after_one_just_inside_it():
+    inside_unverified = make(**spot(1.9))
+    across_verified = make(verification_status=V.VERIFIED, **spot(2.1))
+    assert ranked_ids([across_verified, inside_unverified]) == [
+        inside_unverified.donor_id,
+        across_verified.donor_id,
     ]
 
 
@@ -323,48 +426,36 @@ def test_equal_distances_are_ordered_by_donor_id():
     assert ranked_ids([first, second]) == [first.donor_id, second.donor_id]
 
 
+def test_the_band_size_comes_from_the_rules():
+    unverified_near = make(**spot(1))
+    verified_farther = make(verification_status=V.VERIFIED, **spot(4))
+    candidates = [unverified_near, verified_farther]
+    assert ranked_ids(candidates) == [
+        unverified_near.donor_id,
+        verified_farther.donor_id,
+    ]  # 2 km bands
+    wide = dataclasses.replace(RULES, distance_band_km=5)
+    assert ranked_ids(candidates, rules=wide) == [
+        verified_farther.donor_id,
+        unverified_near.donor_id,
+    ]  # 5 km bands
+
+
 def test_a_full_ranking_example():
-    def donor(blood_type, km, status):
-        latitude, longitude = at_km(km)
-        return make(
-            blood_type=blood_type,
-            latitude=latitude,
-            longitude=longitude,
-            verification_status=status,
-        )
-
-    verified_exact_near = donor(B.A_POS, 2, V.VERIFIED)
-    verified_exact_far = donor(B.A_POS, 20, V.VERIFIED)
-    verified_compatible = donor(B.O_NEG, 1, V.VERIFIED)
-    unverified_exact = donor(B.A_POS, 3, V.UNVERIFIED)
-    unverified_compatible_near = donor(B.O_POS, 1, V.UNVERIFIED)
-    unverified_compatible_far = donor(B.O_NEG, 15, V.UNVERIFIED)
-
-    expected = [
-        verified_exact_near,
-        verified_exact_far,
-        verified_compatible,
-        unverified_exact,
-        unverified_compatible_near,
-        unverified_compatible_far,
-    ]
-    shuffled = [
-        unverified_compatible_far,
-        verified_compatible,
-        unverified_exact,
-        verified_exact_far,
-        unverified_compatible_near,
-        verified_exact_near,
-    ]
+    a = make(blood_type=B.A_POS, verification_status=V.VERIFIED, **spot(0.5))
+    b = make(blood_type=B.O_NEG, verification_status=V.VERIFIED, **spot(1.5))
+    c = make(blood_type=B.A_POS, **spot(0.8))
+    d = make(blood_type=B.O_NEG, **spot(0.3))
+    e = make(blood_type=B.A_POS, verification_status=V.VERIFIED, **spot(3))
+    f = make(blood_type=B.A_POS, **spot(9))
+    shuffled = [f, d, b, e, c, a]
     assert ranked_ids(shuffled, requested=B.A_POS) == [
-        item.donor_id for item in expected
+        item.donor_id for item in (a, b, c, d, e, f)
     ]
 
 
 def test_the_input_order_never_changes_the_result():
-    candidates = [
-        make(latitude=at_km(km)[0], longitude=at_km(km)[1]) for km in (3, 8, 12, 17, 22)
-    ]
+    candidates = [make(**spot(km)) for km in (3, 8, 12, 17, 22)]
     expected = ranked_ids(candidates)
     generator = random.Random(7)
     for _ in range(5):
@@ -395,6 +486,7 @@ def test_every_refusal_is_counted_under_its_reason():
         make(verification_status=V.SUSPENDED),
         make(is_available=False),
         make(date_of_birth=date(2015, 1, 1)),
+        make(date_of_birth=date(1950, 1, 1)),
         make(weight_kg=30.0),
         make(last_donation_date=TODAY),
         make(**FAR),
@@ -407,6 +499,7 @@ def test_every_refusal_is_counted_under_its_reason():
         Rejection.SUSPENDED: 1,
         Rejection.UNAVAILABLE: 1,
         Rejection.TOO_YOUNG: 1,
+        Rejection.TOO_OLD: 1,
         Rejection.UNDERWEIGHT: 1,
         Rejection.DONATED_RECENTLY: 1,
         Rejection.TOO_FAR: 1,
@@ -420,28 +513,23 @@ def test_no_candidates_gives_an_empty_result():
 
 
 def test_the_distance_is_measured_from_the_hospital():
-    [item] = evaluate([make(latitude=at_km(5)[0], longitude=at_km(5)[1])]).ranked
+    [item] = evaluate([make(**spot(5))]).ranked
     assert item.distance_km == pytest.approx(5.0, abs=0.05)
 
 
-def test_the_exact_match_and_verified_flags_are_set():
-    exact_verified = make(blood_type=B.O_POS, verification_status=V.VERIFIED)
-    compatible_unverified = make(blood_type=B.O_NEG)
+def test_the_exact_match_verified_and_band_are_set():
+    exact_verified = make(blood_type=B.O_POS, verification_status=V.VERIFIED, **spot(5))
+    compatible_unverified = make(blood_type=B.O_NEG, **spot(1))
     by_id = {
         item.candidate.donor_id: item
         for item in evaluate([exact_verified, compatible_unverified]).ranked
     }
-    assert (
-        by_id[exact_verified.donor_id].exact_match,
-        by_id[exact_verified.donor_id].verified,
-    ) == (True, True)
-    assert (
-        by_id[compatible_unverified.donor_id].exact_match,
-        by_id[compatible_unverified.donor_id].verified,
-    ) == (
-        False,
-        False,
+    first, second = (
+        by_id[exact_verified.donor_id],
+        by_id[compatible_unverified.donor_id],
     )
+    assert (first.exact_match, first.verified, first.band) == (True, True, 2)
+    assert (second.exact_match, second.verified, second.band) == (False, False, 0)
 
 
 def test_refused_donors_never_appear_in_the_ranking():
@@ -456,9 +544,7 @@ def test_refused_donors_never_appear_in_the_ranking():
 
 
 def test_rank_candidates_returns_the_same_order_as_evaluate_candidates():
-    candidates = [
-        make(latitude=at_km(km)[0], longitude=at_km(km)[1]) for km in (9, 4, 14)
-    ]
+    candidates = [make(**spot(km)) for km in (9, 4, 14)]
     direct = rank_candidates(
         candidates,
         requested_type=B.O_POS,
@@ -475,10 +561,7 @@ def test_rank_candidates_returns_the_same_order_as_evaluate_candidates():
 
 @pytest.fixture()
 def five_ranked() -> list[RankedCandidate]:
-    candidates = [
-        make(latitude=at_km(km)[0], longitude=at_km(km)[1]) for km in (1, 2, 3, 4, 5)
-    ]
-    return evaluate(candidates).ranked
+    return evaluate([make(**spot(km)) for km in (1, 2, 3, 4, 5)]).ranked
 
 
 def test_a_batch_is_the_first_donors_of_the_ranking(five_ranked):
@@ -507,20 +590,38 @@ def test_the_rules_are_read_from_the_settings():
     settings = get_settings()
     rules = MatchingRules.from_settings(settings)
     assert rules.min_age_years == settings.MIN_AGE_YEARS
+    assert rules.upper_age_limit_years == settings.UPPER_AGE_LIMIT_YEARS
     assert rules.min_weight_kg == settings.MIN_WEIGHT_KG
-    assert rules.min_days_between_donations == settings.MIN_DAYS_BETWEEN_DONATIONS
+    assert rules.min_days_male == settings.MIN_DAYS_BETWEEN_DONATIONS_MALE
+    assert rules.min_days_female == settings.MIN_DAYS_BETWEEN_DONATIONS_FEMALE
     assert rules.max_radius_km == settings.MAX_MATCHING_RADIUS_KM
+    assert rules.distance_band_km == settings.DISTANCE_BAND_KM
 
 
 @pytest.mark.parametrize(
     "changes",
     [
         {"min_age_years": 0},
+        {"upper_age_limit_years": 18},
+        {"upper_age_limit_years": 10},
         {"min_weight_kg": 0},
-        {"min_days_between_donations": -1},
+        {"min_days_male": -1},
+        {"min_days_female": -1},
         {"max_radius_km": 0},
+        {"distance_band_km": 0},
+        {"distance_band_km": -2},
     ],
-    ids=["age", "weight", "waiting period", "radius"],
+    ids=[
+        "age",
+        "upper limit equal to minimum",
+        "upper limit below minimum",
+        "weight",
+        "male waiting period",
+        "female waiting period",
+        "radius",
+        "band zero",
+        "band negative",
+    ],
 )
 def test_nonsense_rules_are_refused(changes):
     with pytest.raises(ValueError):

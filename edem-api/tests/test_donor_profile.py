@@ -41,6 +41,34 @@ def years_ago(years: int) -> date:
         return today.replace(year=today.year - years, day=28)
 
 
+def test_a_donor_the_day_before_turning_65_is_accepted(client, db, bank):
+    born = years_ago(get_settings().UPPER_AGE_LIMIT_YEARS) + timedelta(days=1)
+    assert (
+        create(client, donor_user(db), bank, date_of_birth=born.isoformat()).status_code
+        == 201
+    )
+
+
+def test_a_donor_who_turns_65_today_is_refused(client, db, bank):
+    born = years_ago(get_settings().UPPER_AGE_LIMIT_YEARS)
+    response = create(client, donor_user(db), bank, date_of_birth=born.isoformat())
+    assert response.status_code == 422
+    assert "date_of_birth" in error_fields(response)
+    assert "younger than" in response.json()["error"]["details"][0]["message"]
+    assert donor_count(db) == 0
+
+
+def test_an_update_also_refuses_a_date_of_birth_that_makes_the_donor_65(
+    client, db, bank
+):
+    user = donor_user(db)
+    make_donor(db, user=user, blood_bank=bank)
+    born = years_ago(get_settings().UPPER_AGE_LIMIT_YEARS)
+    response = update(client, user, date_of_birth=born.isoformat())
+    assert response.status_code == 422
+    assert "date_of_birth" in error_fields(response)
+
+
 @pytest.fixture()
 def bank(db):
     """An approved, active blood bank that donors may choose."""

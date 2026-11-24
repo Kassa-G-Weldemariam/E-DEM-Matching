@@ -20,7 +20,6 @@ from app.schemas.common import Latitude, Longitude
 # applied by the matching engine, because a donor's weight can change.
 MIN_PLAUSIBLE_WEIGHT_KG = 20
 MAX_PLAUSIBLE_WEIGHT_KG = 300
-MAX_PLAUSIBLE_AGE_YEARS = 120
 
 
 class DonorProfileUpdate(BaseModel):
@@ -48,12 +47,16 @@ class DonorProfileUpdate(BaseModel):
         today = date.today()
         if value > today:
             raise ValueError("Date of birth cannot be in the future")
+        settings = get_settings()
         age = age_in_years(value, today)
-        minimum = get_settings().MIN_AGE_YEARS
-        if age < minimum:
-            raise ValueError(f"You must be at least {minimum} years old to donate")
-        if age > MAX_PLAUSIBLE_AGE_YEARS:
-            raise ValueError("Enter a valid date of birth")
+        if age < settings.MIN_AGE_YEARS:
+            raise ValueError(
+                f"You must be at least {settings.MIN_AGE_YEARS} years old to donate"
+            )
+        if age >= settings.UPPER_AGE_LIMIT_YEARS:
+            raise ValueError(
+                f"Donors must be younger than {settings.UPPER_AGE_LIMIT_YEARS} years old"
+            )
         return value
 
     @field_validator("last_donation_date")

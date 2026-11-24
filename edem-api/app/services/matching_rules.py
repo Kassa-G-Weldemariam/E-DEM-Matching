@@ -4,8 +4,15 @@ Step 3 reads candidates from the database with a looser pre-filter, then passes 
 These functions are the authority: they apply every rule of the Matching Algorithm document.
 
 Rule order for a rejection (the first failing rule is reported):
-    already matched, blood type, account, suspended, availability, age, weight,
-    waiting period, distance.
+    already matched, blood type, account, suspended, availability, age (too young, too old),
+    weight, waiting period (depends on gender), distance.
+
+Ranking, best first:
+    1. the distance band (donors within the same band of km count as equally near)
+    2. verified donors before unverified ones
+    3. an exact blood type before a merely compatible one
+    4. the nearest
+    5. the donor id, so ties are always settled the same way
 """
 
 import uuid
@@ -18,7 +25,7 @@ from enum import Enum
 from app.core.config import Settings
 from app.core.dates import age_in_years
 from app.core.geo import haversine_km
-from app.models.enums import BloodType, VerificationStatus
+from app.models.enums import BloodType, Gender, VerificationStatus
 
 B = BloodType
 
@@ -46,9 +53,12 @@ def is_compatible(donor_type: BloodType, requested_type: BloodType) -> bool:
 @dataclass(frozen=True)
 class MatchingRules:
     min_age_years: int
+    upper_age_limit_years: int  # donors this age or older are refused
     min_weight_kg: float
-    min_days_between_donations: int
+    min_days_male: int
+    min_days_female: int
     max_radius_km: float
+    distance_band_km: float
 
     def __post_init__(self) -> None:
         if (
@@ -59,16 +69,30 @@ class MatchingRules:
             raise ValueError(
                 "The minimum age, minimum weight and radius must be positive"
             )
-        if self.min_days_between_donations < 0:
+        if self.upper_age_limit_years <= self.min_age_years:
+            raise ValueError("The upper age limit must be greater than the minimum age")
+        if self.min_days_male < 0 or self.min_days_female < 0:
             raise ValueError("The waiting period cannot be negative")
+        if self.distance_band_km <= 0:
+            raise ValueError("The distance band must be positive")
+
+    def waiting_days(self, gender: Gender) -> int:
+        if gender == Gender.MALE:
+            return self.min_days_male
+        if gender == Gender.FEMALE:
+            return self.min_days_female
+        raise ValueError(f"No waiting period is defined for {gender!r}")
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "MatchingRules":
         return cls(
             min_age_years=settings.MIN_AGE_YEARS,
+            upper_age_limit_years=settings.UPPER_AGE_LIMIT_YEARS,
             min_weight_kg=settings.MIN_WEIGHT_KG,
-            min_days_between_donations=settings.MIN_DAYS_BETWEEN_DONATIONS,
+            min_days_male=settings.MIN_DAYS_BETWEEN_DONATIONS_MALE,
+            min_days_female=settings.MIN_DAYS_BETWEEN_DONATIONS_FEMALE,
             max_radius_km=settings.MAX_MATCHING_RADIUS_KM,
+            distance_band_km=settings.DISTANCE_BAND_KM,
         )
 
 
@@ -78,6 +102,7 @@ class DonorCandidate:
 
     donor_id: uuid.UUID
     blood_type: BloodType
+    gender: Gender
     latitude: float
     longitude: float
     date_of_birth: date
@@ -95,6 +120,7 @@ class Rejection(str, Enum):
     SUSPENDED = "suspended"
     UNAVAILABLE = "unavailable"
     TOO_YOUNG = "too_young"
+    TOO_OLD = "too_old"
     UNDERWEIGHT = "underweight"
     DONATED_RECENTLY = "donated_recently"
     TOO_FAR = "too_far"
@@ -106,6 +132,7 @@ class RankedCandidate:
     distance_km: float
     exact_match: bool
     verified: bool
+    band: int  # 0 is the nearest band
 
 
 @dataclass(frozen=True)
@@ -137,12 +164,17 @@ def rejection_reason(
         return Rejection.SUSPENDED
     if not candidate.is_available:
         return Rejection.UNAVAILABLE
-    if age_in_years(candidate.date_of_birth, today) < rules.min_age_years:
+
+    age = age_in_years(candidate.date_of_birth, today)
+    if age < rules.min_age_years:
         return Rejection.TOO_YOUNG
+    if age >= rules.upper_age_limit_years:
+        return Rejection.TOO_OLD
+
     if candidate.weight_kg < rules.min_weight_kg:
         return Rejection.UNDERWEIGHT
     if not waiting_period_over(
-        candidate.last_donation_date, today, rules.min_days_between_donations
+        candidate.last_donation_date, today, rules.waiting_days(candidate.gender)
     ):
         return Rejection.DONATED_RECENTLY
     if distance_km > rules.max_radius_km:
@@ -150,14 +182,13 @@ def rejection_reason(
     return None
 
 
-def _ranking_key(ranked: RankedCandidate) -> tuple[int, int, float, str]:
-    # Verified donors first, then an exact blood type, then the nearest.
-    # The donor id makes ties deterministic.
+def _ranking_key(ranked: RankedCandidate) -> tuple[int, int, int, float, str]:
     return (
-        0 if ranked.verified else 1,
-        0 if ranked.exact_match else 1,
-        ranked.distance_km,
-        str(ranked.candidate.donor_id),
+        ranked.band,  # a nearer band always wins
+        0 if ranked.verified else 1,  # inside a band, verified donors first
+        0 if ranked.exact_match else 1,  # then an exact blood type
+        ranked.distance_km,  # then the nearest
+        str(ranked.candidate.donor_id),  # the donor id settles any remaining tie
     )
 
 
@@ -195,6 +226,7 @@ def evaluate_candidates(
                 distance_km=distance,
                 exact_match=candidate.blood_type == requested_type,
                 verified=candidate.verification_status == VerificationStatus.VERIFIED,
+                band=int(distance // rules.distance_band_km),
             )
         )
 

@@ -36,12 +36,18 @@ class Settings(BaseSettings):
     MAX_MATCHING_RADIUS_KM: float = 25.0
     DONORS_PER_BATCH: int = 15
     MAX_BATCHES: int = 3
-    MIN_DAYS_BETWEEN_DONATIONS: int = 56
     MIN_AGE_YEARS: int = 18
     SWEEPER_INTERVAL_SECONDS: int = 15
     ARRIVAL_WINDOW_MINUTES: int = 45
     ACCEPTANCE_CAP_MULTIPLIER: float = 1.5
     MIN_WEIGHT_KG: float = 50.0
+    # Donors this age or older are not matched (and cannot register).
+    UPPER_AGE_LIMIT_YEARS: int = Field(65, gt=0)
+    # Days between whole-blood donations. Confirm both values with Ethiopian guidelines.
+    MIN_DAYS_BETWEEN_DONATIONS_MALE: int = Field(90, gt=0)
+    MIN_DAYS_BETWEEN_DONATIONS_FEMALE: int = Field(120, gt=0)
+    # Donors within the same band of this many km count as equally near.
+    DISTANCE_BAND_KM: float = Field(2.0, gt=0)
 
     # Environment switch
     ENVIRONMENT: str = "development"  # development | test | production
@@ -75,6 +81,12 @@ class Settings(BaseSettings):
             raise ValueError(
                 "JWT_SECRET_KEY must be a random value of at least 32 characters in production"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _check_age_limits(self) -> "Settings":
+        if self.UPPER_AGE_LIMIT_YEARS <= self.MIN_AGE_YEARS:
+            raise ValueError("UPPER_AGE_LIMIT_YEARS must be greater than MIN_AGE_YEARS")
         return self
 
     @property
